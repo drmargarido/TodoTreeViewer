@@ -241,8 +241,6 @@ function TodoTreeView:refresh_cache()
       files_in_git_repository = self.get_all_files_in_git_repo()
     end
 
-    core.log_quiet("files_in_git_repository: %d", #files_in_git_repository)
-
     -- iterate over all files in project folder
     for _, item in pairs(self.get_all_files()) do
       -- check against list of explicitly ignored files
@@ -252,7 +250,6 @@ function TodoTreeView:refresh_cache()
       if not ignored 
         and config.plugins.todotreeview.todo_only_files_from_git_repository
       then
-        core.log_quiet("find file %s : %s", item.filename, files_in_git_repository[item.filename])
         -- ignore file if it is not commited to git 
         if not files_in_git_repository[item.filename] then
           ignored = true
