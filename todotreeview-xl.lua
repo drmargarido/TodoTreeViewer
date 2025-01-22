@@ -35,6 +35,9 @@ config.plugins.todotreeview = common.merge({
   -- Tells if the plugin should start with the nodes expanded
   todo_expanded = true,
 
+  -- Ignore all files which are not part of the git repository
+  todo_only_files_from_git_repository = true,
+
   -- 'tag' mode can be used to group the todos by tags
   -- 'file' mode can be used to group the todos by files
   -- 'file_tag' mode can be used to group the todos by files and then by tags inside the files
@@ -62,6 +65,13 @@ config.plugins.todotreeview = common.merge({
       path = "todo_tags",
       type = "list_strings",
       default = {"TODO", "BUG", "FIX", "FIXME", "IMPROVEMENT"},
+    },
+    {
+      label = "Only files from git repository",
+      description = "Ignore all files which are not commited to the current git repository.",
+      path = "todo_only_files_from_git_repository",
+      type = "toggle",
+      default = true,
     },
     {
       label = "Paths to ignore",
@@ -171,6 +181,33 @@ function TodoTreeView:is_file_in_scope(filename)
   end
 end
 
+-- run command and return stdout
+-- taken from plugins/gitopen.lua
+local function exec(cmd)
+  local proc = process.start(cmd)
+  while proc:running() do
+    coroutine.yield(0.1)
+  end
+  if proc:returncode() > 0 then
+    core.error("ERROR - command: " .. table.concat(cmd, " "))
+  end
+  return proc:read_stdout() or ""
+end
+
+-- get list of all files in git repo
+function TodoTreeView.get_all_files_in_git_repo() 
+  -- local git_root = exec({"git", "rev-parse", "--show-toplevel"}):match( "^%s*(.-)%s*$" )
+  local file_list_str = exec({"git", "ls-tree", "--name-only", "--full-tree", "-r", "HEAD"})
+
+  local git_files = {}
+  for relative_path_from_project_root in string.gmatch(file_list_str, "([^\n]+)") do
+    -- git_files[git_root .. PATHSEP .. relative_path_from_project_root] = true
+    git_files[relative_path_from_project_root] = true
+  end
+
+  return git_files
+end
+
 function TodoTreeView.get_all_files()
   local all_files = {}
   for _, file in ipairs(core.project_files) do
@@ -197,8 +234,31 @@ function TodoTreeView:refresh_cache()
   self.updating_cache = true
 
   core.add_thread(function()
+    -- if user decides to ignore all files not commited to git repository, 
+    -- then prepare a list of files checked in to git repository
+    local files_in_git_repository = {}
+    if config.plugins.todotreeview.todo_only_files_from_git_repository then
+      files_in_git_repository = self.get_all_files_in_git_repo()
+    end
+
+    core.log_quiet("files_in_git_repository: %d", #files_in_git_repository)
+
+    -- iterate over all files in project folder
     for _, item in pairs(self.get_all_files()) do
+      -- check against list of explicitly ignored files
       local ignored = is_file_ignored(item.filename)
+
+      -- when requested, check if file has been commited to git repository
+      if not ignored 
+        and config.plugins.todotreeview.todo_only_files_from_git_repository
+      then
+        core.log_quiet("find file %s : %s", item.filename, files_in_git_repository[item.filename])
+        -- ignore file if it is not commited to git 
+        if not files_in_git_repository[item.filename] then
+          ignored = true
+        end
+      end
+  
       if not ignored and item.type == "file" then
         local cached = self:get_cached(item)
 
